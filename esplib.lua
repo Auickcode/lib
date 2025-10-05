@@ -711,7 +711,23 @@ function EspInterface.getTeamColor(player)
 end
 
 function EspInterface.getCharacter(player)
-	return player.Character;
+	for i, v in getgc() do
+		if typeof(v) == "function" and not iscclosure(v) then
+			if debug.getconstants(v)[1] == "ProjectileSpeed" and string.match(debug.info(v, "s"), "RangedWeaponClient") then
+				createProjectile = v
+			elseif debug.info(v, "n") == "updatePlayers" and string.match(debug.info(v, "s"), "PlayerClient") then
+				players = debug.getupvalue(v, 1)
+			end
+		end
+	end
+
+	for index, p in pairs(players) do
+		if p.model and player == p.model then
+			return p.model
+		end
+	end
+
+	return player.Character
 end
 
 function EspInterface.getHealth(player)
