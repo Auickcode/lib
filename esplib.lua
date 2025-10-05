@@ -721,10 +721,8 @@ function EspInterface.getCharacter(player)
 		end
 	end
 
-	for index, p in pairs(players) do
-		if p.model and player == p.model then
-			return p.model
-		end
+	for index, player in players do
+		player = player.model
 	end
 
 	return player.Character
