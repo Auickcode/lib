@@ -34,6 +34,53 @@ local worldToViewPoint = function(position)
       return Vector2.new(pos.X, pos.Y), onscreen, pos.Z;
 end;
 
+-- projects a model's 3D bounding box into screen-space and returns center and half-size
+local function getScreenRectFromModel(model, isPlayer)
+      local okCFrame, size = getBoundingBox(model, isPlayer);
+      local cframe = okCFrame
+      if not cframe then
+            if model and type(model.GetPivot) == 'function' then
+                  local ok, res = pcall(function() return model:GetPivot() end)
+                  if ok and res then cframe = res end
+            end
+            if not cframe then
+                  cframe = (model and model.PrimaryPart and model.PrimaryPart.CFrame) or CFrame.new()
+            end
+      end
+
+      local half = size * 0.5;
+      local corners = {
+            Vector3.new( half.X,  half.Y,  half.Z);
+            Vector3.new( half.X,  half.Y, -half.Z);
+            Vector3.new( half.X, -half.Y,  half.Z);
+            Vector3.new( half.X, -half.Y, -half.Z);
+            Vector3.new(-half.X,  half.Y,  half.Z);
+            Vector3.new(-half.X,  half.Y, -half.Z);
+            Vector3.new(-half.X, -half.Y,  half.Z);
+            Vector3.new(-half.X, -half.Y, -half.Z);
+      };
+
+      local minX, minY = math.huge, math.huge;
+      local maxX, maxY = -math.huge, -math.huge;
+      local anyOn = false;
+
+      for i = 1, #corners do
+            local worldPos = (cframe * CFrame.new(corners[i])).Position;
+            local screenPos, onscreen = worldToViewPoint(worldPos);
+            if onscreen then anyOn = true end;
+            minX = math.min(minX, screenPos.X);
+            minY = math.min(minY, screenPos.Y);
+            maxX = math.max(maxX, screenPos.X);
+            maxY = math.max(maxY, screenPos.Y);
+      end;
+
+      if not anyOn then
+            return Vector2.new((minX+maxX)/2, (minY+maxY)/2), Vector2.new((maxX-minX)/2, (maxY-minY)/2), false;
+      end;
+
+      return Vector2.new((minX+maxX)/2, (minY+maxY)/2), Vector2.new((maxX-minX)/2, (maxY-minY)/2), true;
+end;
+
 local executor 	= identifyexecutor and identifyexecutor() or 'unknown';
 
 local GLOBAL_FONT = executor == 'AWP' and 0 or executor == 'Zenith' and 3 or 1;
@@ -143,7 +190,7 @@ do
                         Thickness         = 2;
                         Color             = Color3.new(0, 0, 0);
                         Filled            = false;
-                        ZIndex            = BASE_ZINDEX;
+                        ZIndex            = BASE_ZINDEX + 2;
                   }, allDrawings);
 
                         -- optional filled box behind the outline (toggle with settings.boxFill)
@@ -275,25 +322,16 @@ do
       function playerESP:loop(settings, distance)
             local current = self.current;
 
-            local _, size     = getBoundingBox(current.humanoid, true);
-            local goal        = current.rebuiltPos or current.rootPart.Position;
-
-            local vector2, onscreen = worldToViewPoint(goal);
-            if (not onscreen) then
+            -- compute tight screen rectangle for the character model
+            local center, halfSize, onscreen = getScreenRectFromModel(current.humanoid or current.character, true)
+            if not onscreen then
                   return self:hideDrawings();
-            end;
-            self.hidden = false;
+            end
+            self.hidden = false
 
-            local cframe      = CFrame.new(goal, currentCamera.CFrame.Position);
-
-            local x, y = -size.X / 2, size.Y / 2;
-            local topright    = worldToViewPoint((cframe * CFrame.new(x, y, 0)).Position)
-            local bottomright = worldToViewPoint((cframe * CFrame.new(x, -y, 0)).Position)
-
-            local offset = Vector2.new(
-                  math.max(topright.X - vector2.X, bottomright.X - vector2.X),
-                  math.max((vector2.Y - topright.Y), (bottomright.Y - vector2.Y))
-            );
+            -- halfSize is half-width/half-height in screen pixels
+            local offset = halfSize
+            local vector2 = center
 
             self:renderBox(vector2, offset, settings);
             self:renderName(vector2, offset, settings.name);
@@ -571,7 +609,7 @@ do
                         Filled            = false;
                         Thickness         = 1;
                         Color             = Color3.new(0, 0, 0);
-                        ZIndex            = BASE_ZINDEX;
+                        ZIndex            = BASE_ZINDEX + 2;
                   }, allDrawings);
                   boxFill = createDrawing('Square', {
                         Visible           = false;
@@ -623,24 +661,14 @@ do
             end;
       end;
       function entityESP:loop(settings, distance)
-            local goal, size = getBoundingBox(self.entity);
-
-            local vector2, onscreen = worldToViewPoint(goal.Position);
-            if (not onscreen) then
+            local center, halfSize, onscreen = getScreenRectFromModel(self.entity, false)
+            if not onscreen then
                   return self:hideDrawings();
-            end;
-            self.hidden = false;
+            end
+            self.hidden = false
 
-            local cframe = CFrame.new(goal.Position, currentCamera.CFrame.Position);
-
-            local x, y = -size.X / 2, size.Y / 2;
-            local topright    = worldToViewPoint((cframe * CFrame.new(x, y, 0)).Position)
-            local bottomright = worldToViewPoint((cframe * CFrame.new(x, -y, 0)).Position)
-
-            local offset = Vector2.new(
-                  math.max(topright.X - vector2.X, bottomright.X - vector2.X),
-                  math.max((vector2.Y - topright.Y), (bottomright.Y - vector2.Y))
-            );
+            local vector2 = center
+            local offset = halfSize
 
             self:renderBox(vector2, offset, settings);
             self:renderName(vector2, offset, settings.name);
@@ -835,7 +863,7 @@ do
                         Filled            = false;
                         Thickness         = 1;
                         Color             = Color3.new(0, 0, 0);
-                        ZIndex            = BASE_ZINDEX;
+                        ZIndex            = BASE_ZINDEX + 2;
                   }, allDrawings);
 
                   name = createDrawing('Text', {
@@ -897,24 +925,15 @@ do
       function npcESP:loop(settings, distance)
 
             local useR15 = self.humanoid ~= nil and not self.ignoreR15;
-            local goal, size = getBoundingBox(useR15 and self.humanoid or self.entity, useR15);
-
-            local vector2, onscreen = worldToViewPoint(goal.Position);
-            if (not onscreen) then
+            local model = useR15 and self.humanoid or self.entity
+            local center, halfSize, onscreen = getScreenRectFromModel(model, useR15)
+            if not onscreen then
                   return self:hideDrawings();
-            end;
-            self.hidden = false;
+            end
+            self.hidden = false
 
-            local cframe = CFrame.new(goal.Position, currentCamera.CFrame.Position);
-
-            local x, y = -size.X / 2, size.Y / 2;
-            local topright    = worldToViewPoint((cframe * CFrame.new(x, y, 0)).Position)
-            local bottomright = worldToViewPoint((cframe * CFrame.new(x, -y, 0)).Position)
-
-            local offset = Vector2.new(
-                  math.max(topright.X - vector2.X, bottomright.X - vector2.X),
-                  math.max((vector2.Y - topright.Y), (bottomright.Y - vector2.Y))
-            );
+            local vector2 = center
+            local offset = halfSize
 
             self:renderBox(vector2, offset, settings);
             
